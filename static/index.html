@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Avatar Chat Test</title>
+</head>
+
+<body>
+<h2>Avatar Chat Test</h2>
+
+<button id="startBtn">Start</button>
+
+<div style="width:520px; margin-top:20px;">
+    <div style="background:#222; color:#fff; padding:8px;">
+        <video id="welcome" src="/assets/welcome.mp4" style="width:100%; display:none;" playsinline></video>
+        <video id="idle" src="/assets/idle_loop.mp4" style="width:100%; display:none;" loop muted playsinline></video>
+        <video id="talk" style="width:100%; display:none;" playsinline></video>
+    </div>
+
+    <div style="margin-top:12px;">
+        <div id="log" style="height:150px; overflow-y:auto; border:1px solid #ccc; padding:8px;"></div>
+        <input id="msg" placeholder="Type message" style="width:70%" />
+        <button id="send">Send</button>
+    </div>
+</div>
+
+<script>
+let sessionToken = null;
+
+const logEl = document.getElementById("log");
+function log(msg){
+    logEl.innerHTML += "<div>" + msg + "</div>";
+    logEl.scrollTop = logEl.scrollHeight;
+}
+
+const welcome = document.getElementById("welcome");
+const idle = document.getElementById("idle");
+const talk = document.getElementById("talk");
+
+document.getElementById("startBtn").onclick = async function() {
+    // Create session
+    const res = await fetch("/api/session/create", { method: "POST" });
+    const data = await res.json();
+    sessionToken = data.session_token;
+
+    log("Session token: " + sessionToken);
+
+    // Show welcome
+    welcome.style.display = "block";
+    idle.style.display = "none";
+    talk.style.display = "none";
+
+    try { await welcome.play(); } catch(e){}
+
+    // When welcome ends -> switch to idle
+    welcome.onended = () => {
+        welcome.style.display = "none";
+        idle.style.display = "block";
+        idle.play().catch(()=>{});
+        log("State -> IDLE");
+    };
+};
+
+document.getElementById("send").onclick = async function(){
+    const text = document.getElementById("msg").value.trim();
+    if (!text) return;
+
+    if (!sessionToken){
+        log("You must press START first.");
+        return;
+    }
+
+    document.getElementById("msg").value = "";
+    log("You: " + text);
+
+    // idle while backend renders
+    idle.style.display = "block";
+    talk.style.display = "none";
+
+    const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+            session_token: sessionToken,
+            message: text
+        })
+    });
+
+    const data = await res.json();
+    log("Bot: " + data.reply_text);
+    log("Video URL: " + data.video_url);
+
+    // Play talking video
+    idle.pause();
+    idle.style.display = "none";
+    talk.style.display = "block";
+    talk.src = data.video_url;
+
+    talk.load();
+    await talk.play();
+
+    talk.onended = async () => {
+        // Notify server that playback ended
+        await fetch(`/api/session/${sessionToken}/played`, { method: "POST" });
+
+        talk.style.display = "none";
+        idle.style.display = "block";
+        idle.play().catch(()=>{});
+        log("State -> IDLE");
+    };
+};
+</script>
+
+</body>
+</html>
