@@ -45,21 +45,25 @@
 # class CreateSessionResponse(BaseModel):
 #     session_token: str
 
-# # GPT call
-# def call_gpt(user_msg: str) -> str:
+# def call_gpt(user_msg: str):
 #     try:
 #         response = openai.ChatCompletion.create(
 #             model="gpt-4o-mini",
 #             messages=[
-#                 {"role": "system", "content": "You are a friendly AI assistant. Keep responses short."},
+#                 {"role": "system", "content": "You are a friendly AI assistant. Keep responses short. Within 1-2 lines."},
 #                 {"role": "user", "content": user_msg},
 #             ],
 #             max_tokens=150,
 #         )
-#         return response.choices[0].message["content"].strip()
+
+#         reply_text = response.choices[0].message["content"].strip()
+#         usage = response["usage"]  # TOKEN STATS HERE
+
+#         return reply_text, usage
 
 #     except Exception as e:
 #         raise RuntimeError(f"GPT error: {e}")
+
 
 # # create D-ID video
 # def create_did_video(text: str):
@@ -112,19 +116,32 @@
 #     sessions[token] = {"state": "WELCOME"}
 #     return {"session_token": token}
 
-
 # @app.post("/api/chat", response_model=ChatResponse)
 # def chat(req: ChatRequest):
 #     if req.session_token not in sessions:
 #         raise HTTPException(status_code=404, detail="Invalid session token")
 
-#     # GPT reply
+#     # 1. GPT reply + token usage
 #     try:
-#         reply_text = call_gpt(req.message)
+#         reply_text, usage = call_gpt(req.message)
 #     except Exception as e:
 #         raise HTTPException(status_code=500, detail=str(e))
 
-#     # D-ID video
+#     # 2. Send token usage to PHP backend
+#     try:
+#         requests.post(
+#             "https://your-php-backend.com/save-token-usage",
+#             json={
+#                 "session_token": req.session_token,
+#                 "prompt_tokens": usage["prompt_tokens"],
+#                 "completion_tokens": usage["completion_tokens"],
+#                 "total_tokens": usage["total_tokens"]
+#             }
+#         )
+#     except Exception as e:
+#         print("Failed to send usage:", e)
+
+#     # 3. Generate D-ID video
 #     try:
 #         talk_id = create_did_video(reply_text)
 #         video_url = poll_did_video(talk_id)
@@ -147,7 +164,6 @@
 
 # @app.get("/")
 # def root():
-
 #     return {"status": "running"}
 
 import os
@@ -188,11 +204,10 @@ class ChatRequest(BaseModel):
     session_token: str
     message: str
 
-
 class ChatResponse(BaseModel):
     reply_text: str
     video_url: str
-
+    chat_duration_seconds: int  # <-- ADDED
 
 class CreateSessionResponse(BaseModel):
     session_token: str
@@ -265,13 +280,20 @@ sessions = {}
 @app.post("/api/session/create", response_model=CreateSessionResponse)
 def create_session():
     token = str(uuid.uuid4())
-    sessions[token] = {"state": "WELCOME"}
+    sessions[token] = {
+        "state": "WELCOME",
+        "start_time": time.time()  # <-- ADDED
+    }
     return {"session_token": token}
 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
     if req.session_token not in sessions:
         raise HTTPException(status_code=404, detail="Invalid session token")
+
+    # Calculate chat duration (ADDED)
+    start_time = sessions[req.session_token].get("start_time")
+    chat_duration_seconds = int(time.time() - start_time)
 
     # 1. GPT reply + token usage
     try:
@@ -302,8 +324,11 @@ def chat(req: ChatRequest):
 
     sessions[req.session_token]["state"] = "TALKING"
 
-    return ChatResponse(reply_text=reply_text, video_url=video_url)
-
+    return ChatResponse(
+        reply_text=reply_text,
+        video_url=video_url,
+        chat_duration_seconds=chat_duration_seconds  # <-- ADDED
+    )
 
 @app.post("/api/session/{token}/played")
 def played(token: str):
@@ -312,7 +337,6 @@ def played(token: str):
 
     sessions[token]["state"] = "IDLE"
     return {"ok": True, "state": "IDLE"}
-
 
 @app.get("/")
 def root():
