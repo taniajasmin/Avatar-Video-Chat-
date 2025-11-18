@@ -244,7 +244,7 @@ pip install -r requirements.txt
 4. Run the server:
 
 ```bash
-python main.py
+uvicorn main:app --reload
 ```
 
 The server will start on `http://127.0.0.1:8000`
