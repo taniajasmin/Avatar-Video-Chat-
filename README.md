@@ -120,6 +120,7 @@ POST /api/chat
 {
   "reply_text": "Hi there!",
   "video_url": "https://d-id-cloud/...mp4"
+  "chat_duration_seconds": 12
 }
 ```
 
